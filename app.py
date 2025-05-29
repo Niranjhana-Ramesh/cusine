@@ -125,8 +125,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Define explicit paths for model and vectorizer
-MODEL_PATH = r"models2/stacking_model_simplified.pkl"
-VECTORIZER_PATH = r"models2/tfidf_vectorizer_simplified.pkl"
+MODEL_PATH = r"models/stacking_model_simplified.pkl"
+VECTORIZER_PATH = r"models/tfidf_vectorizer_simplified.pkl"
 
 # Load models (with caching for better performance)
 @st.cache_resource
