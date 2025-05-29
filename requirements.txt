@@ -5,3 +5,4 @@ scipy>=1.14.1
 plotly>=5.22.0
 scikit-learn>=1.5.2
 xgboost>=1.7.6
+lightgbm>=4.5.0
