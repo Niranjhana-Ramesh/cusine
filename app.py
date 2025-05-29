@@ -3,6 +3,8 @@ import joblib
 import pandas as pd
 from collections import Counter
 import time
+import re
+from scipy.sparse import hstack
 
 # Page configuration
 st.set_page_config(
@@ -122,46 +124,65 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Define explicit paths for model and vectorizer
+MODEL_PATH = r"models2/stacking_model_simplified.pkl"
+VECTORIZER_PATH = r"models2/tfidf_vectorizer_simplified.pkl"
+
 # Load models (with caching for better performance)
 @st.cache_resource
 def load_models():
     try:
-        model = joblib.load('models/ensemble_model.pkl')
-        vectorizer = joblib.load('models/count_vectorizer.pkl')
+        model = joblib.load(MODEL_PATH)
+        vectorizer = joblib.load(VECTORIZER_PATH)
         return model, vectorizer
     except FileNotFoundError:
-        st.error("⚠️ Model files not found. Please ensure 'ensemble_model.pkl' and 'count_vectorizer.pkl' are in the 'models' directory.")
+        st.error("⚠️ Model files not found. Please ensure 'stacking_model_simplified.pkl' and 'tfidf_vectorizer_simplified.pkl' are in the 'models2' directory.")
         return None, None
 
 # Cuisine mapping
 cuisine_mapping = {
-    'Italian': 1, 'Mexican': 2, 'Southern US': 3, 'Indian': 4, 'Chinese': 5,
-    'French': 6, 'Cajun Creole': 7, 'Thai': 8, 'Japanese': 9, 'Greek': 10,
-    'Spanish': 11, 'Korean': 12, 'Vietnamese': 13, 'Moroccan': 14, 'British': 15,
-    'Filipino': 16, 'Irish': 17, 'Jamaican': 18, 'Russian': 19, 'Brazilian': 20
+    'italian': 1, 'mexican': 2, 'southern_us': 3, 'indian': 4, 'chinese': 5,
+    'french': 6, 'cajun_creole': 7, 'thai': 8, 'japanese': 9, 'greek': 10,
+    'spanish': 11, 'korean': 12, 'vietnamese': 13, 'moroccan': 14, 'british': 15,
+    'filipino': 16, 'irish': 17, 'jamaican': 18, 'russian': 19, 'brazilian': 20
 }
 reverse_cuisine_mapping = {v: k for k, v in cuisine_mapping.items()}
 
 # Popular ingredients by cuisine for suggestions
 ingredient_suggestions = {
-    'Italian': ['olive oil', 'garlic', 'tomato', 'basil', 'parmesan cheese', 'mozzarella', 'oregano', 'pasta'],
-    'Mexican': ['tortilla', 'avocado', 'chili powder', 'cilantro', 'lime', 'cumin', 'black beans', 'corn'],
-    'Indian': ['turmeric', 'cumin', 'coriander', 'ginger', 'ghee', 'curry leaves', 'garam masala', 'basmati rice'],
-    'Chinese': ['soy sauce', 'ginger', 'green onions', 'sesame oil', 'star anise', 'rice wine', 'hoisin sauce'],
-    'Thai': ['coconut milk', 'lemongrass', 'fish sauce', 'chili', 'thai basil', 'galangal', 'lime leaves'],
-    'Japanese': ['soy sauce', 'mirin', 'sushi rice', 'nori', 'sesame seeds', 'dashi', 'miso', 'sake'],
-    'French': ['butter', 'cream', 'wine', 'shallots', 'parsley', 'thyme', 'bay leaves', 'cognac'],
-    'Greek': ['feta cheese', 'olive oil', 'oregano', 'cucumber', 'tomato', 'olives', 'phyllo', 'tzatziki']
+    'italian': ['olive oil', 'garlic', 'tomato', 'basil', 'parmesan cheese', 'mozzarella', 'oregano', 'pasta'],
+    'mexican': ['tortilla', 'avocado', 'chili powder', 'cilantro', 'lime', 'cumin', 'black beans', 'corn'],
+    'indian': ['turmeric', 'cumin', 'coriander', 'ginger', 'ghee', 'curry leaves', 'garam masala', 'basmati rice'],
+    'chinese': ['soy sauce', 'ginger', 'green onions', 'sesame oil', 'star anise', 'rice wine', 'hoisin sauce'],
+    'thai': ['coconut milk', 'lemongrass', 'fish sauce', 'chili', 'thai basil', 'galangal', 'lime leaves'],
+    'japanese': ['soy sauce', 'mirin', 'sushi rice', 'nori', 'sesame seeds', 'dashi', 'miso', 'sake'],
+    'french': ['butter', 'cream', 'wine', 'shallots', 'parsley', 'thyme', 'bay leaves', 'cognac'],
+    'greek': ['feta cheese', 'olive oil', 'oregano', 'cucumber', 'tomato', 'olives', 'phyllo', 'tzatziki']
 }
 
 # Flag emojis for cuisines
 cuisine_flags = {
-    'Italian': '🇮🇹', 'Mexican': '🇲🇽', 'Southern US': '🇺🇸', 'Indian': '🇮🇳',
-    'Chinese': '🇨🇳', 'French': '🇫🇷', 'Cajun Creole': '🇺🇸', 'Thai': '🇹🇭',
-    'Japanese': '🇯🇵', 'Greek': '🇬🇷', 'Spanish': '🇪🇸', 'Korean': '🇰🇷',
-    'Vietnamese': '🇻🇳', 'Moroccan': '🇲🇦', 'British': '🇬🇧', 'Filipino': '🇵🇭',
-    'Irish': '🇮🇪', 'Jamaican': '🇯🇲', 'Russian': '🇷🇺', 'Brazilian': '🇧🇷'
+    'italian': '🇮🇹', 'mexican': '🇲🇽', 'southern_us': '🇺🇸', 'indian': '🇮🇳',
+    'chinese': '🇨🇳', 'french': '🇫🇷', 'cajun_creole': '🇺🇸', 'thai': '🇹🇭',
+    'japanese': '🇯🇵', 'greek': '🇬🇷', 'spanish': '🇪🇸', 'korean': '🇰🇷',
+    'vietnamese': '🇻🇳', 'moroccan': '🇲🇦', 'british': '🇬🇧', 'filipino': '🇵🇭',
+    'irish': '🇮🇪', 'jamaican': '🇯🇲', 'russian': '🇷🇺', 'brazilian': '🇧🇷'
 }
+
+# Standardize ingredients function
+def standardize_ingredients(ingredients):
+    if not isinstance(ingredients, list):
+        return []
+    standardized = [re.sub(r'[^a-zA-Z\s]', '', ingr.lower().strip()) for ingr in ingredients]
+    standardized = [re.sub(r'\s+', ' ', ingr) for ingr in standardized]
+    synonyms = {
+        'ground black pepper': 'black pepper',
+        'extra virgin olive oil': 'olive oil',
+        'fresh cilantro': 'cilantro',
+        'chopped cilantro fresh': 'cilantro',
+        'yellow corn meal': 'cornmeal'
+    }
+    return [synonyms.get(ingr, ingr) for ingr in standardized if ingr]
 
 def main():
     # Header
@@ -215,7 +236,7 @@ def manual_input_interface(model, vectorizer):
             
             # Predict button
             if st.button("🔮 Predict Cuisine", type="primary", use_container_width=True):
-                predict_cuisine(ingredients, model, vectorizer)
+                predict_cuisine([ingredients], model, vectorizer)
     
     with col2:
         st.subheader("💡 Ingredient Suggestions")
@@ -276,11 +297,11 @@ def quick_select_interface(model, vectorizer):
         col1, col2 = st.columns(2)
         with col1:
             if st.button("🗑️ Clear All", use_container_width=True):
-                st.session_state.selected_ingredients = joking
+                st.session_state.selected_ingredients = []
                 st.rerun()
         with col2:
             if st.button("🔮 Predict Cuisine", type="primary", use_container_width=True):
-                predict_cuisine(st.session_state.selected_ingredients, model, vectorizer)
+                predict_cuisine([st.session_state.selected_ingredients], model, vectorizer)
 
 def batch_prediction_interface(model, vectorizer):
     st.header("📊 Batch Prediction")
@@ -316,8 +337,8 @@ def batch_prediction_interface(model, vectorizer):
         if recipes:
             batch_predict(recipes, model, vectorizer)
 
-def predict_cuisine(ingredients, model, vectorizer):
-    if not ingredients:
+def predict_cuisine(ingredient_lists, model, vectorizer):
+    if not ingredient_lists or not any(ingredient_lists):
         st.warning("🤔 Please add some ingredients first to get started!")
         return
     
@@ -343,102 +364,77 @@ def predict_cuisine(ingredients, model, vectorizer):
     status_text.empty()
     
     try:
-        # Preprocess and predict
-        ingredients_text = ' '.join(ingredients)
-        ingredients_bow = vectorizer.transform([ingredients_text]).toarray()
+        # Preprocess ingredients
+        processed_data = []
+        ingredient_counts = []
         
-        prediction = model.predict(ingredients_bow)[0]
-        predicted_cuisine = reverse_cuisine_mapping.get(prediction, "Unknown")
+        for ingredients in ingredient_lists:
+            # Standardize ingredients
+            standardized = standardize_ingredients(ingredients)
+            if not standardized:
+                processed_data.append('missing')
+                ingredient_counts.append(0)
+            else:
+                processed_data.append(' '.join(standardized))
+                ingredient_counts.append(len(standardized))
+
+        # Create DataFrame
+        df = pd.DataFrame({
+            'ingredients': processed_data,
+            'ingredient_count': ingredient_counts
+        })
+
+        # Filter out invalid entries
+        valid_df = df[df['ingredients'] != 'missing']
+        if valid_df.empty:
+            st.warning("No valid ingredient lists provided!")
+            return
+
+        # Apply TF-IDF transformation
+        X_tfidf = vectorizer.transform(valid_df['ingredients'])
+        X_counts = valid_df[['ingredient_count']].values
+        X_combined = hstack([X_tfidf, X_counts])
+
+        # Make predictions
+        predictions = model.predict(X_combined)
         
-        # Check if model supports predict_proba
-        if hasattr(model, 'predict_proba'):
-            prediction_proba = model.predict_proba(ingredients_bow)[0]
-            confidence = max(prediction_proba) * 100
-            proba_available = True
-        else:
-            confidence = 100.0
-            prediction_proba = [0.0] * len(cuisine_mapping)
-            prediction_proba[prediction - 1] = 1.0
-            proba_available = False
+        # Map predictions to cuisine names
+        predicted_cuisines = [reverse_cuisine_mapping.get(pred, 'unknown') for pred in predictions]
         
-        # Success animation
-        st.balloons()
-        
-        # Enhanced results display
-        flag = cuisine_flags.get(predicted_cuisine, '🍽️')
-        confidence_text = f"Confidence: {confidence:.1f}%" if proba_available else "Confidence: High (Hard Voting)"
-        
-        # Main prediction with enhanced styling
-        st.markdown(f'''
-        <div class="prediction-card">
-            <h1 style="font-size: 2.5rem; margin-bottom: 0.5rem;">{flag}</h1>
-            <h2 style="font-size: 2rem; margin-bottom: 1rem;">{predicted_cuisine} Cuisine</h2>
-            <h3 style="font-size: 1.4rem; opacity: 0.9;">{confidence_text}</h3>
-        </div>
-        ''', unsafe_allow_html=True)
-        
-        # Confidence visualization
-        if proba_available:
-            import plotly.graph_objects as go
-            fig = go.Figure(go.Indicator(
-                mode="gauge+number",
-                value=confidence,
-                domain={'x': [0, 1], 'y': [0, 1]},
-                title={'text': "Confidence Level", 'font': {'size': 18}},
-                gauge={
-                    'axis': {'range': [0, 100], 'tickfont': {'size': 12}},
-                    'bar': {'color': "#1E90FF"},
-                    'steps': [
-                        {'range': [0, 50], 'color': "#D3D3D3"},
-                        {'range': [50, 80], 'color': "#FFD700"},
-                        {'range': [80, 100], 'color': "#32CD32"}
-                    ],
-                    'threshold': {
-                        'line': {'color': "#FF0000", 'width': 4},
-                        'thickness': 0.75,
-                        'value': 90
-                    }
-                }
-            ))
-            fig.update_layout(height=200, font={'size': 14})
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Confidence gauge not available for this model (hard voting used).")
-        
-        # Top predictions
-        st.subheader("📈 Top Predictions")
-        if proba_available:
-            top_indices = prediction_proba.argsort()[-5:][::-1]
-            for idx in top_indices:
-                cuisine_name = reverse_cuisine_mapping.get(idx + 1, "Unknown")
-                prob = prediction_proba[idx] * 100
-                flag = cuisine_flags.get(cuisine_name, '🍽️')
-                
-                col1, col2, col3 = st.columns([1, 3, 1])
-                with col1:
-                    st.write(f"{flag}")
-                with col2:
-                    st.write(f"**{cuisine_name}**")
-                with col3:
-                    st.write(f"{prob:.1f}%")
-                
-                # Progress bar
-                st.progress(prob / 100)
-        else:
-            # Display only the predicted cuisine
+        # Handle invalid entries in output
+        result = []
+        valid_idx = 0
+        for i, ingredients in enumerate(processed_data):
+            if ingredients == 'missing':
+                result.append('Invalid input (empty ingredients)')
+            else:
+                result.append(predicted_cuisines[valid_idx])
+                valid_idx += 1
+
+        # Display result (single prediction case)
+        if len(ingredient_lists) == 1:
+            predicted_cuisine = result[0]
+            if predicted_cuisine == 'Invalid input (empty ingredients)':
+                st.warning("Invalid input: Empty ingredient list")
+                return
+            
+            # Success animation
+            st.balloons()
+            
+            # Main prediction with enhanced styling
             flag = cuisine_flags.get(predicted_cuisine, '🍽️')
-            col1, col2, col3 = st.columns([1, 3, 1])
-            with col1:
-                st.write(f"{flag}")
-            with col2:
-                st.write(f"**{predicted_cuisine}**")
-            with col3:
-                st.write("100.0%")
-            st.progress(1.0)
-            st.info("Only the top prediction is shown as probability scores are not available (hard voting).")
-                
-    except Exception as E:
-        st.error(f"Error during prediction: {str(E)}")
+            st.markdown(f'''
+            <div class="prediction-card">
+                <h1 style="font-size: 2.5rem; margin-bottom: 0.5rem;">{flag}</h1>
+                <h2 style="font-size: 2rem; margin-bottom: 1rem;">{predicted_cuisine.capitalize()} Cuisine</h2>
+                <h3 style="font-size: 1.4rem; opacity: 0.9;">Confidence: High (Stacked Model)</h3>
+            </div>
+            ''', unsafe_allow_html=True)
+            
+            st.info("Confidence scores not available for stacked model. Prediction based on robust stacking classifier.")
+        
+    except Exception as e:
+        st.error(f"Error during prediction: {str(e)}")
         return
 
 def batch_predict(recipes, model, vectorizer):
@@ -450,35 +446,63 @@ def batch_predict(recipes, model, vectorizer):
     with st.spinner('🔍 Processing batch predictions...'):
         results = []
         
-        for i, ingredients in enumerate(recipes):
-            if not ingredients:
-                continue
-            ingredients_text = ' '.join(ingredients)
-            ingredients_bow = vectorizer.transform([ingredients_text]).toarray()
-            
-            try:
-                prediction = model.predict(ingredients_bow)[0]
-                predicted_cuisine = reverse_cuisine_mapping.get(prediction, "Unknown")
-                
-                # Get confidence if available
-                confidence = 100.0
-                if hasattr(model, 'predict_proba'):
-                    prediction_proba = model.predict_proba(ingredients_bow)[0]
-                    confidence = max(prediction_proba) * 100
-                
-                results.append({
-                    'Recipe': f"Recipe {i+1}",
-                    'Ingredients': ', '.join(ingredients),
-                    'Predicted Cuisine': predicted_cuisine,
-                    'Flag': cuisine_flags.get(predicted_cuisine, '🍽️'),
-                    'Confidence': f"{confidence:.1f}%"
-                })
-            except Exception as E:
-                st.error(f"Error predicting Recipe {i+1}: {str(E)}")
-                continue
+        # Preprocess ingredients
+        processed_data = []
+        ingredient_counts = []
         
-        if not results:
-            st.warning("No valid recipes were processed!")
+        for ingredients in recipes:
+            standardized = standardize_ingredients(ingredients)
+            if not standardized:
+                processed_data.append('missing')
+                ingredient_counts.append(0)
+            else:
+                processed_data.append(' '.join(standardized))
+                ingredient_counts.append(len(standardized))
+
+        # Create DataFrame
+        df = pd.DataFrame({
+            'ingredients': processed_data,
+            'ingredient_count': ingredient_counts
+        })
+
+        # Filter out valid entries
+        valid_df = df[df['ingredients'] != 'missing']
+        if valid_df.empty:
+            st.warning("No valid ingredient lists provided!")
+            return
+
+        # Apply TF-IDF transformation
+        X_tfidf = vectorizer.transform(valid_df['ingredients'])
+        X_counts = valid_df[['ingredient_count']].values
+        X_combined = hstack([X_tfidf, X_counts])
+
+        # Make predictions
+        try:
+            predictions = model.predict(X_combined)
+            predicted_cuisines = [reverse_cuisine_mapping.get(pred, 'unknown') for pred in predictions]
+            
+            # Construct results
+            valid_idx = 0
+            for i, ingredients in enumerate(recipes):
+                if processed_data[i] == 'missing':
+                    results.append({
+                        'Recipe': f"Recipe {i+1}",
+                        'Ingredients': ', '.join(ingredients) if ingredients else 'None',
+                        'Predicted Cuisine': 'Invalid input (empty ingredients)',
+                        'Flag': '⚠️',
+                        'Confidence': 'N/A'
+                    })
+                else:
+                    results.append({
+                        'Recipe': f"Recipe {i+1}",
+                        'Ingredients': ', '.join(ingredients),
+                        'Predicted Cuisine': predicted_cuisines[valid_idx].capitalize(),
+                        'Flag': cuisine_flags.get(predicted_cuisines[valid_idx], '🍽️'),
+                        'Confidence': 'High (Stacked Model)'
+                    })
+                    valid_idx += 1
+        except Exception as e:
+            st.error(f"Error during batch prediction: {str(e)}")
             return
         
         # Display results as a dataframe
@@ -499,7 +523,7 @@ def batch_predict(recipes, model, vectorizer):
         
         # Cuisine distribution chart using Chart.js
         if results:
-            cuisine_counts = Counter([r['Predicted Cuisine'] for r in results])
+            cuisine_counts = Counter([r['Predicted Cuisine'] for r in results if r['Predicted Cuisine'] != 'Invalid input (empty ingredients)'])
             
             chart_data = {
                 "type": "pie",
@@ -540,7 +564,7 @@ def batch_predict(recipes, model, vectorizer):
             }
             st.markdown("### Cuisine Distribution")
             st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-            st.json(chart_data)  # This will be rendered as a Chart.js chart
+            st.json(chart_data)
             st.markdown('</div>', unsafe_allow_html=True)
 
 def add_footer():

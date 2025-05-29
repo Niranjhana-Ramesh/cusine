@@ -1,3 +1,1 @@
-*.pkl filter=lfs diff=lfs merge=lfs -text
-models/ensemble_model.pkl filter=lfs diff=lfs merge=lfs -text
-models/count_vectorizer.pkl filter=lfs diff=lfs merge=lfs -text
+models/*.pkl filter=lfs diff=lfs merge=lfs -text
